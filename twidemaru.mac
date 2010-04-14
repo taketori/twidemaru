@@ -1,0 +1,302 @@
+// twidemaru.mac
+$mn = "twidemaru - ";
+// copyright (C) taketori <taketori at x10d.jp>
+// ライセンスは、いわゆる「修正BSD」です。
+// 動作環境は、秀丸(Ver.8.00以上)・COMのインストール・読み出し・実行ができ、編集中ファイルの読み出し・実行、および保存先のフォルダにて読み出し・書き込みができる 環境。
+// 設定によっては、本マクロと同じフォルダにて、ファイルを作成・書き込みできること。
+// 以上の詳細は、配布ファイルに同梱の<README.txt>を参照。本マクロのマニュアルは<twidemaru.mac.txt>。
+
+//// 設定。設定に当たっては配布ファイルに同梱の<twidemaru.mac.txt>(マニュアル)を参照。
+//// 設定の各項目は、設定ファイルに記入してください。
+//// 配布ファイルに同梱の<twidemaru.mac.ini.sample>が設定ファイルのサンプルになっています。
+//
+//// 設定ファイルがあるフォルダとファイル名。
+$init = currentmacrofilename + ".ini";
+/// フォローリスト
+$flw_list = currentmacrofilename + ".followings.list";
+//// 設定、ここまで ////////////////////
+
+// 実行できない条件の時は、さっさと終了する。
+if( version < 800 ){
+		message $mn + "\n秀丸のバージョンが古いです。マクロを終了します。";
+	endmacro;
+}
+if( !existfile($init) ){
+	message $mn + "設定ファイル " + $init + " が存在しません。\nマクロを終了します。";
+	endmacro;
+}
+if( $flw_list == "" ){
+	message $mn + "設定ファイル " + $init + " 中の[general]セクションのflw_listの値が取得できません。\nマクロを終了します。";
+	endmacro;
+}
+if( rectselecting ){
+	message $mn + "\n矩形選択されているため、マクロを終了します。";
+	endmacro;
+}
+
+INIT:
+// 初期設定
+
+	#_[0] = x;	#_[1] = y;
+	$_[0] = searchbuffer;	#_[2] = searchoption;	$_[1] = getsearchhist(0);
+	#_[3] = foundhilighting;	$_[2] = foundbuffer;	#_[4] = foundoption;
+	#_[5] = overwrite;	#_[6] = browsemode;	#_[7] = readonly;	#_[8] = imestate;	#_[9] = freecursor;
+	if( #_[5] )	overwriteswitch;
+	if( #_[6] )	browsemodeswitch;
+	if( #_[7] )	readonlyswitch;
+	if( #_[8] )	imeswitch;
+	if( #_[9] )	freecursorswitch;
+	setcompatiblemode 0x0002 | 0x0008 | 0x0200;		// 0x002=折りたたみを無視ししてなるべく維持, 0x0008=部分編集を無視してなるべく維持, 0x0200=検索での表示を「範囲選択」。
+	$_[3] = filename2;
+	begingroupundo;
+	forceinselect 1;
+	disabledraw;
+
+	if(basename                    == "$$twidemaru$$"
+	|| gettitle(0/*キャプション*/) == "$$twidemaru$$"
+	|| gettitle(2/*見出しバー*/)   == "$$twidemaru$$"
+	|| gettitle(3/*タブ*/)         == "$$twidemaru$$"){
+		#TwidemaruConsole = true;
+	}
+
+MAIN:
+
+	if(replay || selecting || rectselecting){
+		 /*続行*/
+	}else{
+		// ユーザ名を補完する。
+		if(!existfile($flw_list))		call make_flwlist $flw_list;
+		enabledraw;
+		call comple_flwing $flw_list;
+	}
+
+	title $mn;
+	if(#TwidemaruConsole == false
+	&& selecting == false && rectselecting == false
+	&& 1 <= linecount2)
+	{
+		question $mn + "\nこの行を利用してつぶやきますか。\n利用する→[はい]　これから入力する→[いいえ]";
+		if(!result){
+			// twidemaruコンソールを開く。
+			openfile "$$twidemaru$$";
+			title "$$twidemaru$$", 0/*キャプション*/;
+			title "$$twidemaru$$", 2/*見出しバー*/;
+			title "$$twidemaru$$", 3/*タブ*/;
+			title -1;
+//			insert "$twidemaru> ";
+//			gofiletop;
+//			beginsel;
+//			right 10;
+//			colormarker -1, -1, 1, 0, 0x10d01;
+//			escape;
+//			clearupdated;
+//			gofileend;
+			call end_macro;
+		}
+	}
+
+	call get_str;
+	if($$return == "")	call end_macro;
+	call update $$return;
+	if(##return)	title -1;
+	if(!#TwidemaruConsole){
+		if(selecting || rectselecting){
+			delete;
+		}else{
+			moveto2 seltopcolumn + strlen($$return), lineno;
+			deletebefore;
+		}
+	}
+
+	call end_macro;
+
+endmacro;
+
+make_flwlist:
+// followings一覧を作成する。
+//arg: $フォローリストのファイル名
+
+	// DOMオブジェクトの確保。
+	title $mn + "followingsリストを作成しています。";
+	##dom = createobject("Msxml2.DOMDocument.3.0");
+	if(!##dom)	call end_macro "Msxml2.DOMDocument.3.0が使えない環境のため、続行できません。";
+	setpropnum ##dom, "async", 0;
+
+	// データ取得
+	call open_http "GET", "statuses/friends.xml";
+	if(!##return)	call end_macro "Twitterからデータを取得できません。";
+	callmethod ##dom, "loadXML", getpropstr(getpropobj(##return, "responseXML"), "xml");
+	if(member(member(##dom, "parseError"), "errorCode") != 0){
+		call end_macro "Twitterから取得したXMLファイルの解析に失敗しました:" + member(member(##dom, "parseError"), "reason");
+	}
+
+	// スクリーン名を抽出
+	##sn = callmethod_returnobj(##dom, "getElementsByTagName", "screen_name");
+	if(!##sn)	call end_macro "スクリーン名の抽出に失敗しました。";
+	##i   = 0;
+	$$ret = "";
+	while(##i < getpropnum(##sn, "length")){
+		$$sn = member(getcollection(##sn), "text");
+		$$ret = $$ret + "@"  + $$sn + " \n";
+		$$ret = $$ret + "d_" + $$sn + " \n";
+		##i = ##i + 1;
+	}
+	##_ = getcollection(##sn, 3/*解放*/);
+
+	// followings一覧に保存。
+	##hdnow = hidemaruhandle(0);
+	openfile "/n /h " + $$1;
+	insert $$ret;
+	save;
+	##hdflw = hidemaruhandle(0);
+	setactivehidemaru ##hdnow;
+	closehidemaru ##hdflw;
+
+return $$1;
+
+comple_flwing:
+// フォローしている人を補完する。
+//arg: $followings一覧
+//RET: #_[0](マクロ終了時のx座標)
+
+	title $mn + "ユーザ名を補完してください。";
+	autocomplete -1,
+	             0x2 | 0x4,
+	             0x3 | 0x20 | 0x100 | 0x1000 | 0x2000 | 0x4000 | 0x100000,
+	             $$1;
+	if(result){
+		#_[0] = x;
+		##compb = column - (result & 0xffff0000) / 0x10000;
+		##compa = column - result & 0x0000ffff;
+		if(leftstr(gettext2(##compb, lineno, ##compa, lineno), 2) == "d_"){
+			// 補完結果の前2文字が"d_"の場合は"d "に置換する。
+			moveto ##compb, lineno;
+			beginsel;
+			right 2;
+			insert "d ";
+		}
+		call end_macro;
+	}
+
+return;
+
+get_str:
+// status=tweetになる文章をカーソル行から取得して、##wcslenで指定した長さで切って返す。
+//arg:--
+//ret:$対象になる文章or""
+
+
+	##wcslen = 140;
+	// tweet対象文章の取得
+	if(selecting){
+		if(seltoplineno != selendlineno){
+			endsel;
+			moveto2 seltopcolumn, seltoplineno;
+			$$str = gettext2(seltopcolumn, seltoplineno, linelen2, seltoplineno, 1);
+		}else{
+			$$str = gettext2(seltopcolumn, seltoplineno, selendcolumn, seltoplineno, 1);
+		}
+	}else{
+		$$str = gettext2(0, lineno, linelen2, lineno);
+	}
+
+	// 指定文字数より長い場合に問い合わせ。
+	if(##wcslen < wcslen($$str)){
+		##objShell = createobject("WScript.Shell");
+		if(##objShell){
+			// COMを使ってYes,No,Cancel型で問い合わせる。
+			##result = callmethod_returnnum(##objShell, "Popup", "対象の文字数が長すぎます。\n指定された文字数で切りますか？\n　きってつぶやく→[はい]\n　切らずにつぶやく→[いいえ]\n　つぶやきをやめる→[キャンセル] / 5秒間放置", 5, $mn, 3/*type:YesNoCancel*/ + 32/*icon:?*/ + 512/*focus:3rd button*/);
+			if(##result == 6/*Yes*/){
+				/*続行*/
+			}else if(##result == 7/*No*/){
+				##wcslen = wcslen($$str);
+			}else{
+				return;
+			}
+		}else{
+			// 秀丸の機能だけで問い合わせる。
+			question $mn + "\n対象の文字数が長すぎます。\n指定された文字数で切りますか？\n　きってつぶやく→[はい]\n　つぶやきをやめる→[いいえ]";
+			if(!result)	return;
+		}
+	}
+
+return wcsleftstr($$str, ##wcslen);
+
+update:
+// twitterにてつぶやく。
+//arg: $アップデートに使う文字。
+//ret: 0=何かエラー。0以外=#XMLHTTPで取得したオブジェクトの番号。
+
+	// エンコード
+	title $mn + "エンコードしています。";
+	##hmnetex = createobject("hmnetast.hmnetex");
+	if(##hmnetex){
+		$$tweet = callmethod_returnstr(##hmnetex, "URLEncode", $$1, 3/*UTF-8*/);
+		releaseobject ##hmnetex;
+	}else{
+		##sc = createobject("ScriptControl");
+		if(##sc){
+			setpropstr ##sc, "Language", "JScript";
+			$$tweet = callmethod_returnstr(##sc, "Run", "encodeURIComponent", $$1);
+			releaseobject ##sc;
+		}else{
+			question $mn + "HidemaruExplorer, JScriptのどちらも呼び出せないため、エンコードできません。続行しますか。";
+			if(!result)	return;
+			$$tweet = $$1;
+		}
+	}
+
+	call open_http "POST", "statuses/update.xml?status=" + $$tweet;
+
+return ##return;
+
+open_http:
+// XMLHTTPのopenメソッドを呼び出す。
+//arg: $接続方法(POST/GET), $APIとなる文字列およびその引数
+//ret: 0=何かエラー。0以外=#XMLHTTPで取得したオブジェクトの番号。
+
+	$$url = "https://twitter.com/";
+	$$usr = getinistr($init, basename2, "user");
+	if($$usr == ""){
+		$$usr = input($mn + "twitterのユーザ名を入力してください。\n[いいえ]→マクロ終了")
+		if(result == false || $$usr == "")	call end_macro "ユーザ名を取得できません。";
+	}
+	$$pass = getinistr($init, basename2, "pass");
+	if($$pass == ""){
+		$$pass = input($mn + "twitterのユーザ名を入力してください。\n[いいえ]→マクロ終了")
+		if(result == false || $$pass == "")	call end_macro "ユーザ名を取得できません。";
+	}
+
+	title $mn + $$1 + "のために接続 " + $$url;
+	##xmlhttp = createobject("Msxml2.XMLHTTP.3.0");
+	if(!##xmlhttp)	##xmlhttp = createobject("Microsoft.XMLHTTP");
+	if(!##xmlhttp)	return 0;
+	callmethod ##xmlhttp, "open", $$1, $$url + $$2, 0, $$usr, $$pass;
+	callmethod ##xmlhttp, "send";
+	title $mn + "XMLHTTP result = " + str(getpropnum(##xmlhttp, "status")) + " " +  getpropstr(##xmlhttp, "statusText");
+
+return ##xmlhttp * (getpropnum(##xmlhttp, "status"));
+
+end_macro:
+//arg: $エラーメッセージ, $エラーコード
+
+	//TODO: WSH解放
+
+	if($$1 != ""){
+		message $mn + "\n" + $$1;
+		endmacro $$2;
+	}
+
+	escape;
+	moveto #_[0], #_[1];
+	if( #_[5] )	overwriteswitch;
+	if( #_[6] )	browsemodeswitch;
+	if( #_[7] )	readonlyswitch;
+	if( #_[8] )	imeswitch;
+	if( #_[9] )	freecursorswitch;
+
+	endgroupundo;
+
+	if(#TwidemaruConsole)	closehidemaruforced 0;
+
+endmacro;
