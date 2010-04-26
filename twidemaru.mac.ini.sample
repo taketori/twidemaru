@@ -1,5 +1,5 @@
 ; twidemaru.mac.ini
-[general]
+[]
 
 ; UTF-8への変換、URLエンコードするときに、どの方法を使うか。
 ;  0xF:
@@ -18,7 +18,5 @@
 ;  4 = メッセージボックス。
 ;  8 = debuginfo。
 
-
-[twidemaru.mac]
 user = 
 pass = 

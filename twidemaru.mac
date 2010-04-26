@@ -256,12 +256,12 @@ open_http:
 //ret: 0=何かエラー。0以外=#XMLHTTPで取得したオブジェクトの番号。
 
 	$$url = "https://twitter.com/";
-	$$usr = getinistr($init, basename2, "user");
+	$$usr = getinistr($init, "", "user");
 	if($$usr == ""){
 		$$usr = input($mn + "twitterのユーザ名を入力してください。\n[いいえ]→マクロ終了")
 		if(result == false || $$usr == "")	call end_macro "ユーザ名を取得できません。";
 	}
-	$$pass = getinistr($init, basename2, "pass");
+	$$pass = getinistr($init, "", "pass");
 	if($$pass == ""){
 		$$pass = input($mn + "twitterのユーザ名を入力してください。\n[いいえ]→マクロ終了")
 		if(result == false || $$pass == "")	call end_macro "ユーザ名を取得できません。";
